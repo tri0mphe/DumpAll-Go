@@ -4,12 +4,14 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
 
 	"dumpall-go/internal/dumper"
+	"dumpall-go/pkg/utils"
+
+	"github.com/fatih/color"
 )
 
 // GitDumper 实现 .git 源代码下载
@@ -57,21 +59,10 @@ func (d *GitDumper) Validate(url string) error {
 }
 
 // Dump 下载 Git 源代码
-func (g *GitDumper) Dump(targetURL, outdir, proxy string, force bool) error {
-	// 解析代理URL
-	var httpClient *http.Client
-	if proxy != "" {
-		proxyURL, err := url.Parse(proxy)
-		if err != nil {
-			return fmt.Errorf("解析代理URL失败: %v", err)
-		}
-		httpClient = &http.Client{
-			Transport: &http.Transport{
-				Proxy: http.ProxyURL(proxyURL),
-			},
-		}
-	} else {
-		httpClient = &http.Client{}
+func (g *GitDumper) Dump(targetURL, outdir, proxyAddr string, force bool) error {
+	httpClient, err := utils.CreateHTTPClient(proxyAddr)
+	if err != nil {
+		return fmt.Errorf("创建HTTP客户端失败: %v", err)
 	}
 
 	// 确保目标URL以/结尾
@@ -139,18 +130,12 @@ func (d *GitDumper) Check(targetURL string, client *http.Client) (bool, error) {
 }
 
 // Execute 执行下载操作
-func (d *GitDumper) Execute(targetURL string, outdir string, proxy string, force bool, debug bool, workers int, progressCb dumper.ProgressCallback) error {
-	// 创建HTTP客户端
-	client := &http.Client{}
-	if proxy != "" {
-		proxyURL, err := url.Parse(proxy)
-		if err != nil {
-			return fmt.Errorf("代理设置错误: %v", err)
-		}
-		transport := &http.Transport{
-			Proxy: http.ProxyURL(proxyURL),
-		}
-		client.Transport = transport
+func (d *GitDumper) Execute(targetURL string, outdir string, proxyAddr string, force bool, debug bool, workers int, progressCb dumper.ProgressCallback) error {
+	// 创建HTTP客户端（支持 http/https/socks5 代理）
+	color.Cyan("[Git] 初始化扫描: %s", targetURL)
+	client, err := utils.CreateHTTPClient(proxyAddr)
+	if err != nil {
+		return fmt.Errorf("[Git] 创建HTTP客户端失败: %v", err)
 	}
 
 	// 确保URL以/结尾
@@ -181,6 +166,7 @@ func (d *GitDumper) Execute(targetURL string, outdir string, proxy string, force
 		".git/info/exclude",
 	}
 
+	color.Cyan("[Git] 共需检测 %d 个文件", len(gitFiles))
 	// 下载文件
 	for _, file := range gitFiles {
 		fileURL := targetURL + file
@@ -188,6 +174,7 @@ func (d *GitDumper) Execute(targetURL string, outdir string, proxy string, force
 
 		// 创建目录
 		if err := os.MkdirAll(filepath.Dir(localPath), 0755); err != nil {
+			color.Red("[Git] 创建目录失败 %s: %v", filepath.Dir(localPath), err)
 			if progressCb != nil {
 				progressCb(fileURL, 0, "创建目录失败")
 			}
@@ -195,8 +182,10 @@ func (d *GitDumper) Execute(targetURL string, outdir string, proxy string, force
 		}
 
 		// 下载文件
+		color.Yellow("[Git] 请求: %s", fileURL)
 		resp, err := client.Get(fileURL)
 		if err != nil {
+			color.Red("[Git] 请求失败: %s -> %v", fileURL, err)
 			if progressCb != nil {
 				progressCb(fileURL, 0, "下载失败")
 			}
@@ -209,6 +198,7 @@ func (d *GitDumper) Execute(targetURL string, outdir string, proxy string, force
 		}
 
 		if resp.StatusCode != http.StatusOK {
+			color.Yellow("[Git] 跳过(状态码 %d): %s", resp.StatusCode, fileURL)
 			resp.Body.Close()
 			continue
 		}
@@ -216,6 +206,7 @@ func (d *GitDumper) Execute(targetURL string, outdir string, proxy string, force
 		// 创建本地文件
 		f, err := os.Create(localPath)
 		if err != nil {
+			color.Red("[Git] 创建本地文件失败 %s: %v", localPath, err)
 			resp.Body.Close()
 			continue
 		}
@@ -226,11 +217,13 @@ func (d *GitDumper) Execute(targetURL string, outdir string, proxy string, force
 		f.Close()
 
 		if err != nil {
+			color.Red("[Git] 写入失败 %s: %v", localPath, err)
 			if progressCb != nil {
 				progressCb(fileURL, 0, "写入失败")
 			}
 			continue
 		}
+		color.Green("[Git] 已保存: %s -> %s", fileURL, localPath)
 	}
 
 	return nil

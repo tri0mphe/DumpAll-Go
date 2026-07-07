@@ -2,7 +2,10 @@ package utils
 
 import (
 	"bufio"
+	"context"
 	"fmt"
+	"net"
+	"net/http"
 	"net/url"
 	"os"
 	"strings"
@@ -11,6 +14,7 @@ import (
 
 	"github.com/fatih/color"
 	"github.com/schollz/progressbar/v3"
+	"golang.org/x/net/proxy"
 )
 
 type Task struct {
@@ -183,4 +187,92 @@ func GetHostname(targetURL string) string {
 		return "unknown"
 	}
 	return hostname
+}
+
+// CreateHTTPClient 创建带有代理支持的 HTTP 客户端
+// 支持协议: http://, https://, socks5://, socks5h://
+// proxyAddr 示例:
+//
+//	http://127.0.0.1:8080
+//	http://user:pass@127.0.0.1:8080
+//	socks5://127.0.0.1:1080
+//	socks5://user:pass@127.0.0.1:1080
+//	socks5h://127.0.0.1:1080   (socks5h = 远端DNS解析)
+func CreateHTTPClient(proxyAddr string) (*http.Client, error) {
+	if proxyAddr == "" {
+		color.Cyan("[代理] 未设置代理，使用直连模式")
+		return &http.Client{}, nil
+	}
+
+	proxyURL, err := url.Parse(proxyAddr)
+	if err != nil {
+		return nil, fmt.Errorf("[代理] 解析代理地址失败 %q: %v", proxyAddr, err)
+	}
+
+	scheme := strings.ToLower(proxyURL.Scheme)
+
+	switch scheme {
+	case "http", "https":
+		// HTTP/HTTPS 代理
+		transport := &http.Transport{
+			Proxy: http.ProxyURL(proxyURL),
+		}
+		client := &http.Client{Transport: transport}
+
+		host := proxyURL.Hostname()
+		port := proxyURL.Port()
+		user := ""
+		if proxyURL.User != nil {
+			user = proxyURL.User.Username()
+		}
+		if user != "" {
+			color.Cyan("[代理] 使用 %s 代理: %s:%s (用户: %s)", strings.ToUpper(scheme), host, port, user)
+		} else {
+			color.Cyan("[代理] 使用 %s 代理: %s:%s", strings.ToUpper(scheme), host, port)
+		}
+		return client, nil
+
+	case "socks5", "socks5h":
+		// SOCKS5 代理
+		var auth *proxy.Auth
+		if proxyURL.User != nil {
+			pwd, _ := proxyURL.User.Password()
+			auth = &proxy.Auth{
+				User:     proxyURL.User.Username(),
+				Password: pwd,
+			}
+		}
+
+		host := proxyURL.Hostname()
+		port := proxyURL.Port()
+		if port == "" {
+			port = "1080"
+		}
+		proxyHostPort := net.JoinHostPort(host, port)
+
+		// socks5h 表示让代理服务器做DNS解析（远端DNS）
+		dialer, err := proxy.SOCKS5("tcp", proxyHostPort, auth, proxy.Direct)
+		if err != nil {
+			return nil, fmt.Errorf("[代理] 创建 SOCKS5 代理失败 %q: %v", proxyAddr, err)
+		}
+
+		transport := &http.Transport{
+			DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
+				return dialer.Dial(network, addr)
+			},
+		}
+		client := &http.Client{Transport: transport}
+
+		if auth != nil {
+			color.Cyan("[代理] 使用 SOCKS5 代理: %s (用户: %s, DNS解析: %s)",
+				proxyHostPort, auth.User, map[bool]string{true: "远端(socks5h)", false: "本地(socks5)"}[scheme == "socks5h"])
+		} else {
+			color.Cyan("[代理] 使用 SOCKS5 代理: %s (无认证, DNS解析: %s)",
+				proxyHostPort, map[bool]string{true: "远端(socks5h)", false: "本地(socks5)"}[scheme == "socks5h"])
+		}
+		return client, nil
+
+	default:
+		return nil, fmt.Errorf("[代理] 不支持的代理协议 %q，支持: http, https, socks5, socks5h", scheme)
+	}
 }

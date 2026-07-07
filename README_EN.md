@@ -73,7 +73,7 @@ Flags:
   -u, --url string      Target URL
   -f, --file string     File containing list of URLs
   -o, --outdir string   Output directory (default "output")
-  -p, --proxy string    Proxy server (e.g., http://127.0.0.1:8080)
+  -p, --proxy string    Proxy server (supports: http://host:port | https://host:port | socks5://host:port | socks5h://host:port)
   -w, --workers int     Number of concurrent workers (default 10)
   -h, --help           Show help information
 ```
@@ -93,6 +93,23 @@ Flags:
 ```
 
 ![Batch Scanning](./pic/file.png)
+
+3. Scan with HTTP proxy:
+```bash
+./dumpall-go -u http://example.com/ -p http://127.0.0.1:8080
+```
+4. Scan with SOCKS5 proxy:
+```bash
+./dumpall-go -u http://example.com/ -p socks5://127.0.0.1:1080
+```
+5. Scan with authenticated SOCKS5 proxy:
+```bash
+./dumpall-go -u http://example.com/ -p socks5://user:pass@127.0.0.1:1080
+```
+6. Scan with SOCKS5H proxy (DNS resolved by proxy server):
+```bash
+./dumpall-go -u http://example.com/ -p socks5h://127.0.0.1:1080
+```
 
 ## 🤝 Contributing
 

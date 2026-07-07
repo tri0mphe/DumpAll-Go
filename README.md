@@ -77,7 +77,7 @@ Flags:
   -u, --url string      目标URL
   -f, --file string     包含URL列表的文件
   -o, --outdir string   输出目录 (default "output")
-  -p, --proxy string    代理服务器 (例如: http://127.0.0.1:8080)
+  -p, --proxy string    代理服务器 (支持: http://host:port | https://host:port | socks5://host:port | socks5h://host:port)
   -w, --workers int     并发工作线程数 (default 10)
   -h, --help           查看帮助信息
 ```
@@ -91,6 +91,22 @@ Flags:
 2. 批量扫描：
 ```bash
 ./dumpall-go -f target.txt
+```
+3. 使用 HTTP 代理扫描：
+```bash
+./dumpall-go -u http://example.com/ -p http://127.0.0.1:8080
+```
+4. 使用 SOCKS5 代理扫描：
+```bash
+./dumpall-go -u http://example.com/ -p socks5://127.0.0.1:1080
+```
+5. 使用带认证的 SOCKS5 代理：
+```bash
+./dumpall-go -u http://example.com/ -p socks5://user:pass@127.0.0.1:1080
+```
+6. 使用 SOCKS5H 代理（由代理服务器解析 DNS）：
+```bash
+./dumpall-go -u http://example.com/ -p socks5h://127.0.0.1:1080
 ```
 ## 🤝 贡献指南
 

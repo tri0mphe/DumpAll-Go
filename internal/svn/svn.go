@@ -4,12 +4,14 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
 
 	"dumpall-go/internal/dumper"
+	"dumpall-go/pkg/utils"
+
+	"github.com/fatih/color"
 )
 
 // SvnDumper 实现 .svn 源代码下载
@@ -62,18 +64,12 @@ func (d *SvnDumper) Check(targetURL string, client *http.Client) (bool, error) {
 }
 
 // Execute 执行下载操作
-func (d *SvnDumper) Execute(targetURL string, outdir string, proxy string, force bool, debug bool, workers int, progressCb dumper.ProgressCallback) error {
-	// 创建HTTP客户端
-	client := &http.Client{}
-	if proxy != "" {
-		proxyURL, err := url.Parse(proxy)
-		if err != nil {
-			return fmt.Errorf("代理设置错误: %v", err)
-		}
-		transport := &http.Transport{
-			Proxy: http.ProxyURL(proxyURL),
-		}
-		client.Transport = transport
+func (d *SvnDumper) Execute(targetURL string, outdir string, proxyAddr string, force bool, debug bool, workers int, progressCb dumper.ProgressCallback) error {
+	// 创建HTTP客户端（支持 http/https/socks5 代理）
+	color.Cyan("[SVN] 初始化扫描: %s", targetURL)
+	client, err := utils.CreateHTTPClient(proxyAddr)
+	if err != nil {
+		return fmt.Errorf("[SVN] 创建HTTP客户端失败: %v", err)
 	}
 
 	// 确保URL以/结尾
@@ -97,6 +93,7 @@ func (d *SvnDumper) Execute(targetURL string, outdir string, proxy string, force
 		".svn/tmp",
 	}
 
+	color.Cyan("[SVN] 共需检测 %d 个文件", len(svnFiles))
 	// 下载文件
 	for _, file := range svnFiles {
 		fileURL := targetURL + file
@@ -104,6 +101,7 @@ func (d *SvnDumper) Execute(targetURL string, outdir string, proxy string, force
 
 		// 创建目录
 		if err := os.MkdirAll(filepath.Dir(localPath), 0755); err != nil {
+			color.Red("[SVN] 创建目录失败 %s: %v", filepath.Dir(localPath), err)
 			if progressCb != nil {
 				progressCb(fileURL, 0, "创建目录失败")
 			}
@@ -111,8 +109,10 @@ func (d *SvnDumper) Execute(targetURL string, outdir string, proxy string, force
 		}
 
 		// 下载文件
+		color.Yellow("[SVN] 请求: %s", fileURL)
 		resp, err := client.Get(fileURL)
 		if err != nil {
+			color.Red("[SVN] 请求失败: %s -> %v", fileURL, err)
 			if progressCb != nil {
 				progressCb(fileURL, 0, "下载失败")
 			}
@@ -125,6 +125,7 @@ func (d *SvnDumper) Execute(targetURL string, outdir string, proxy string, force
 		}
 
 		if resp.StatusCode != http.StatusOK {
+			color.Yellow("[SVN] 跳过(状态码 %d): %s", resp.StatusCode, fileURL)
 			resp.Body.Close()
 			continue
 		}
@@ -132,6 +133,7 @@ func (d *SvnDumper) Execute(targetURL string, outdir string, proxy string, force
 		// 创建本地文件
 		f, err := os.Create(localPath)
 		if err != nil {
+			color.Red("[SVN] 创建本地文件失败 %s: %v", localPath, err)
 			resp.Body.Close()
 			continue
 		}
@@ -142,11 +144,13 @@ func (d *SvnDumper) Execute(targetURL string, outdir string, proxy string, force
 		f.Close()
 
 		if err != nil {
+			color.Red("[SVN] 写入失败 %s: %v", localPath, err)
 			if progressCb != nil {
 				progressCb(fileURL, 0, "写入失败")
 			}
 			continue
 		}
+		color.Green("[SVN] 已保存: %s -> %s", fileURL, localPath)
 	}
 
 	return nil

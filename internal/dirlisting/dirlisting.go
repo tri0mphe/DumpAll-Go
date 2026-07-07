@@ -10,8 +10,10 @@ import (
 	"strings"
 
 	"dumpall-go/internal/dumper"
+	"dumpall-go/pkg/utils"
 
 	"github.com/PuerkitoBio/goquery"
+	"github.com/fatih/color"
 )
 
 // DirListingDumper 实现目录列表下载
@@ -87,18 +89,12 @@ func (d *DirListingDumper) Check(targetURL string, client *http.Client) (bool, e
 }
 
 // Execute 执行下载操作
-func (d *DirListingDumper) Execute(targetURL string, outdir string, proxy string, force bool, debug bool, workers int, progressCb dumper.ProgressCallback) error {
-	// 创建HTTP客户端
-	client := &http.Client{}
-	if proxy != "" {
-		proxyURL, err := url.Parse(proxy)
-		if err != nil {
-			return fmt.Errorf("代理设置错误: %v", err)
-		}
-		transport := &http.Transport{
-			Proxy: http.ProxyURL(proxyURL),
-		}
-		client.Transport = transport
+func (d *DirListingDumper) Execute(targetURL string, outdir string, proxyAddr string, force bool, debug bool, workers int, progressCb dumper.ProgressCallback) error {
+	// 创建HTTP客户端（支持 http/https/socks5 代理）
+	color.Cyan("[DirListing] 初始化扫描: %s", targetURL)
+	client, err := utils.CreateHTTPClient(proxyAddr)
+	if err != nil {
+		return fmt.Errorf("[DirListing] 创建HTTP客户端失败: %v", err)
 	}
 
 	// 确保URL以/结尾
@@ -112,11 +108,14 @@ func (d *DirListingDumper) Execute(targetURL string, outdir string, proxy string
 	}
 
 	// 获取页面内容
+	color.Yellow("[DirListing] 请求目录页面: %s", targetURL)
 	resp, err := client.Get(targetURL)
 	if err != nil {
+		color.Red("[DirListing] 请求失败: %s -> %v", targetURL, err)
 		return fmt.Errorf("获取页面失败: %v", err)
 	}
 	defer resp.Body.Close()
+	color.Cyan("[DirListing] 响应状态码: %d  URL: %s", resp.StatusCode, targetURL)
 
 	// 解析HTML
 	doc, err := goquery.NewDocumentFromReader(resp.Body)
@@ -160,13 +159,16 @@ func (d *DirListingDumper) Execute(targetURL string, outdir string, proxy string
 		// 创建目录
 		if strings.HasSuffix(href, "/") {
 			if err := os.MkdirAll(localPath, 0755); err != nil {
+				color.Red("[DirListing] 创建子目录失败 %s: %v", localPath, err)
 				if progressCb != nil {
 					progressCb(fileURL.String(), 0, "创建目录失败")
 				}
 				return
 			}
+			color.Cyan("[DirListing] 递归扫描子目录: %s", fileURL.String())
 			// 递归下载子目录
-			if err := d.Execute(fileURL.String(), localPath, proxy, force, debug, workers, progressCb); err != nil {
+			if err := d.Execute(fileURL.String(), localPath, proxyAddr, force, debug, workers, progressCb); err != nil {
+				color.Red("[DirListing] 下载子目录失败 %s: %v", fileURL.String(), err)
 				if progressCb != nil {
 					progressCb(fileURL.String(), 0, "下载子目录失败")
 				}
@@ -175,8 +177,10 @@ func (d *DirListingDumper) Execute(targetURL string, outdir string, proxy string
 		}
 
 		// 下载文件
+		color.Yellow("[DirListing] 请求文件: %s", fileURL.String())
 		resp, err := client.Get(fileURL.String())
 		if err != nil {
+			color.Red("[DirListing] 请求失败: %s -> %v", fileURL.String(), err)
 			if progressCb != nil {
 				progressCb(fileURL.String(), 0, "下载失败")
 			}
@@ -189,6 +193,7 @@ func (d *DirListingDumper) Execute(targetURL string, outdir string, proxy string
 		}
 
 		if resp.StatusCode != http.StatusOK {
+			color.Yellow("[DirListing] 跳过(状态码 %d): %s", resp.StatusCode, fileURL.String())
 			resp.Body.Close()
 			return
 		}
@@ -196,6 +201,7 @@ func (d *DirListingDumper) Execute(targetURL string, outdir string, proxy string
 		// 创建本地文件
 		f, err := os.Create(localPath)
 		if err != nil {
+			color.Red("[DirListing] 创建本地文件失败 %s: %v", localPath, err)
 			resp.Body.Close()
 			if progressCb != nil {
 				progressCb(fileURL.String(), 0, "创建文件失败")
@@ -209,11 +215,13 @@ func (d *DirListingDumper) Execute(targetURL string, outdir string, proxy string
 		f.Close()
 
 		if err != nil {
+			color.Red("[DirListing] 写入失败 %s: %v", localPath, err)
 			if progressCb != nil {
 				progressCb(fileURL.String(), 0, "写入失败")
 			}
 			return
 		}
+		color.Green("[DirListing] 已保存: %s -> %s", fileURL.String(), localPath)
 	})
 
 	return nil

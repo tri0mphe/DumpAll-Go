@@ -154,7 +154,7 @@ func init() {
 	RootCmd.PersistentFlags().StringVarP(&targetURL, "url", "u", "", "目标URL")
 	RootCmd.PersistentFlags().StringVarP(&urlFile, "file", "f", "", "包含URL列表的文件")
 	RootCmd.PersistentFlags().StringVarP(&outdir, "outdir", "o", "output", "输出目录")
-	RootCmd.PersistentFlags().StringVarP(&proxy, "proxy", "p", "", "代理服务器 (例如: http://127.0.0.1:8080)")
+	RootCmd.PersistentFlags().StringVarP(&proxy, "proxy", "p", "", "代理服务器 (支持: http://host:port | https://host:port | socks5://host:port | socks5h://host:port)")
 	RootCmd.PersistentFlags().IntVarP(&workers, "workers", "w", 10, "并发工作线程数")
 }
 
