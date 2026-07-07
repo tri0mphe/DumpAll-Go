@@ -1,7 +1,6 @@
 package svn
 
 import (
-	"bufio"
 	"database/sql"
 	"fmt"
 	"io"
@@ -178,40 +177,66 @@ type SvnFileEntry struct {
 }
 
 // ParseEntriesFromData 解析 SVN 1.6 及更早的 entries 文件（纯文本格式）
-// entries 格式：每条记录由 12 行组成，第1行是文件名，第2行是类型(file/dir)
+//
+// SVN entries 真实格式（version 8~10）：
+//
+//	第一行：格式版本号，如 "10"
+//	之后每条记录之间以 \f（换页符, 0x0C）分隔
+//	每条记录内各字段以 \n 分隔，字段顺序为：
+//	  [0] kind      → "file" 或 "dir"
+//	  [1] name      → 文件/目录名（根节点此字段为空）
+//	  [2] ...       → 其余字段（revision、url 等）
+//
+// 注意：根节点（第一条记录）name 为空，应跳过。
 func ParseEntriesFromData(data []byte) []SvnFileEntry {
 	var entries []SvnFileEntry
-	scanner := bufio.NewScanner(strings.NewReader(string(data)))
 
-	// 第一行是格式版本号（如 "10"），跳过
-	if !scanner.Scan() {
-		return entries
+	// 打印前200字节原始内容辅助排查
+	preview := string(data)
+	if len(preview) > 200 {
+		preview = preview[:200]
 	}
+	color.Yellow("[SVN-Extract] entries 原始内容预览(前200字节): %q", preview)
 
-	// 每条记录以空行分隔，字段依次为：
-	// [0] 名称, [1] kind(file/dir), [2] revision, [3] url, ...
-	var record []string
-	for scanner.Scan() {
-		line := scanner.Text()
-		if line == "" {
-			// 空行表示一条记录结束
-			if len(record) >= 2 {
-				name := record[0]
-				kind := record[1]
-				if name != "" && (kind == "file" || kind == "dir") {
-					entries = append(entries, SvnFileEntry{RelPath: name, Kind: kind})
-				}
-			}
-			record = nil
+	// 以换页符 \f 切割成多条记录
+	records := strings.Split(string(data), "\f")
+	color.Yellow("[SVN-Extract] entries 共切割出 %d 条原始记录", len(records))
+
+	for i, record := range records {
+		// 每条记录内以换行符分隔各字段
+		// 去掉首尾空白（包括首行的版本号行也在 records[0] 里）
+		record = strings.TrimLeft(record, "\n\r")
+		lines := strings.Split(record, "\n")
+
+		// records[0] 的第一行是版本号（如 "10"），跳过
+		if i == 0 {
+			// 第0块：版本号行 + 根目录记录
+			// 跳过版本号行后，后续才是根目录字段
+			// 根目录 name 为空，直接跳过整块
+			color.Yellow("[SVN-Extract] 跳过第0块(版本号+根目录): %q", strings.Join(lines, "|"))
 			continue
 		}
-		record = append(record, line)
-	}
-	// 处理最后一条记录（文件末尾无空行时）
-	if len(record) >= 2 {
-		name := record[0]
-		kind := record[1]
-		if name != "" && (kind == "file" || kind == "dir") {
+
+		// 过滤掉空行，防止 \f\n 导致 lines[0] 为空
+		var nonEmpty []string
+		for _, l := range lines {
+			if strings.TrimSpace(l) != "" {
+				nonEmpty = append(nonEmpty, strings.TrimSpace(l))
+			}
+		}
+		if len(nonEmpty) < 2 {
+			continue
+		}
+
+		kind := nonEmpty[0]
+		name := nonEmpty[1]
+
+		color.Yellow("[SVN-Extract] 记录[%d] kind=%q name=%q", i, kind, name)
+
+		if name == "" {
+			continue
+		}
+		if kind == "file" || kind == "dir" {
 			entries = append(entries, SvnFileEntry{RelPath: name, Kind: kind})
 		}
 	}
