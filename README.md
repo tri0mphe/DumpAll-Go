@@ -2,8 +2,6 @@
 
 <div align="center">
 
-
-
 [![Go Version](https://img.shields.io/github/go-mod/go-version/whgojp/DumpAll-Go)](https://github.com/whgojp/DumpAll-Go)
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
 
@@ -90,16 +88,10 @@ Flags:
 ```bash
 ./dumpall-go -u http://example.com/
 ```
-
-![单个目标扫描](./pic/url.png)
-
 2. 批量扫描：
 ```bash
 ./dumpall-go -f target.txt
 ```
-
-![批量扫描](./pic/file.png)
-
 ## 🤝 贡献指南
 
 欢迎各种形式的贡献，包括但不限于：
