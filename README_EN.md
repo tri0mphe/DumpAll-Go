@@ -116,14 +116,10 @@ output/<hostname>/
 ./dumpall-go -u http://example.com/
 ```
 
-![Single Target Scan](./pic/url.png)
-
 2. Batch scanning:
 ```bash
 ./dumpall-go -f target.txt
 ```
-
-![Batch Scanning](./pic/file.png)
 
 3. Scan with HTTP proxy:
 ```bash

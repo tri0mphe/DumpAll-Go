@@ -153,8 +153,18 @@ func (d *DirListingDumper) Execute(targetURL string, outdir string, proxyAddr st
 			return
 		}
 
-		// 构建本地路径
-		localPath := filepath.Join(outdir, href)
+		// 构建本地路径：用 fileURL.Path 相对于 baseURL.Path 的部分，防止路径穿越
+		// 例如 href="../../../etc/passwd" 经 url.Parse 解析后 fileURL 可能超出预期目录
+		relPath := strings.TrimPrefix(fileURL.Path, baseURL.Path)
+		relPath = filepath.FromSlash(relPath)
+		// filepath.Join + Clean 会消除 .. 但不能阻止绝对路径；手动加前缀校验
+		localPath := filepath.Join(outdir, relPath)
+		// 路径穿越检查：确保 localPath 在 outdir 内
+		cleanOut := filepath.Clean(outdir) + string(os.PathSeparator)
+		if !strings.HasPrefix(filepath.Clean(localPath)+string(os.PathSeparator), cleanOut) {
+			color.Red("[DirListing] 路径穿越，跳过: %s", fileURL.String())
+			return
+		}
 
 		// 创建目录
 		if strings.HasSuffix(href, "/") {

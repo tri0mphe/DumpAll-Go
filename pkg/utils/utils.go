@@ -2,9 +2,7 @@ package utils
 
 import (
 	"bufio"
-	"context"
 	"fmt"
-	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -14,7 +12,6 @@ import (
 
 	"github.com/fatih/color"
 	"github.com/schollz/progressbar/v3"
-	"golang.org/x/net/proxy"
 )
 
 type Task struct {
@@ -159,13 +156,9 @@ func CreateOutputDir(outdir string) error {
 	return nil
 }
 
-func ValidateURL(url string) error {
-	if !strings.HasPrefix(url, "http://") && !strings.HasPrefix(url, "https://") {
-		url = "https://" + url
-	}
-
-	if !strings.HasPrefix(url, "http://") && !strings.HasPrefix(url, "https://") {
-		return fmt.Errorf("URL必须以http://或https://开头")
+func ValidateURL(rawURL string) error {
+	if !strings.HasPrefix(rawURL, "http://") && !strings.HasPrefix(rawURL, "https://") {
+		return fmt.Errorf("URL 必须以 http:// 或 https:// 开头，实际得到: %q", rawURL)
 	}
 	return nil
 }
@@ -189,15 +182,19 @@ func GetHostname(targetURL string) string {
 	return hostname
 }
 
-// CreateHTTPClient 创建带有代理支持的 HTTP 客户端
-// 支持协议: http://, https://, socks5://, socks5h://
-// proxyAddr 示例:
+// CreateHTTPClient 创建带有代理支持的 HTTP 客户端。
 //
-//	http://127.0.0.1:8080
-//	http://user:pass@127.0.0.1:8080
-//	socks5://127.0.0.1:1080
-//	socks5://user:pass@127.0.0.1:1080
-//	socks5h://127.0.0.1:1080   (socks5h = 远端DNS解析)
+// 支持的代理协议（Go 1.7+ net/http.Transport 原生支持）：
+//
+//	http://host:port                     HTTP 代理
+//	http://user:pass@host:port           HTTP 代理（带认证）
+//	https://host:port                    HTTPS 代理
+//	socks5://host:port                   SOCKS5 代理（本地 DNS 解析）
+//	socks5://user:pass@host:port         SOCKS5 代理（带认证）
+//	socks5h://host:port                  SOCKS5H 代理（由代理服务器解析 DNS）
+//
+// 所有协议均通过 http.Transport.Proxy = http.ProxyURL() 实现，
+// 完整保留 request context 的取消/超时语义，无需额外依赖。
 func CreateHTTPClient(proxyAddr string) (*http.Client, error) {
 	if proxyAddr == "" {
 		color.Cyan("[代理] 未设置代理，使用直连模式")
@@ -210,10 +207,10 @@ func CreateHTTPClient(proxyAddr string) (*http.Client, error) {
 	}
 
 	scheme := strings.ToLower(proxyURL.Scheme)
-
 	switch scheme {
-	case "http", "https":
-		// HTTP/HTTPS 代理
+	case "http", "https", "socks5", "socks5h":
+		// net/http.Transport 从 Go 1.7 起原生支持 socks5/socks5h scheme，
+		// 直接使用 http.ProxyURL 即可，context 取消/超时语义完整保留。
 		transport := &http.Transport{
 			Proxy: http.ProxyURL(proxyURL),
 		}
@@ -225,50 +222,16 @@ func CreateHTTPClient(proxyAddr string) (*http.Client, error) {
 		if proxyURL.User != nil {
 			user = proxyURL.User.Username()
 		}
+		dnsNote := ""
+		if scheme == "socks5" {
+			dnsNote = " (DNS: 本地解析)"
+		} else if scheme == "socks5h" {
+			dnsNote = " (DNS: 远端解析)"
+		}
 		if user != "" {
-			color.Cyan("[代理] 使用 %s 代理: %s:%s (用户: %s)", strings.ToUpper(scheme), host, port, user)
+			color.Cyan("[代理] 使用 %s 代理: %s:%s (用户: %s)%s", strings.ToUpper(scheme), host, port, user, dnsNote)
 		} else {
-			color.Cyan("[代理] 使用 %s 代理: %s:%s", strings.ToUpper(scheme), host, port)
-		}
-		return client, nil
-
-	case "socks5", "socks5h":
-		// SOCKS5 代理
-		var auth *proxy.Auth
-		if proxyURL.User != nil {
-			pwd, _ := proxyURL.User.Password()
-			auth = &proxy.Auth{
-				User:     proxyURL.User.Username(),
-				Password: pwd,
-			}
-		}
-
-		host := proxyURL.Hostname()
-		port := proxyURL.Port()
-		if port == "" {
-			port = "1080"
-		}
-		proxyHostPort := net.JoinHostPort(host, port)
-
-		// socks5h 表示让代理服务器做DNS解析（远端DNS）
-		dialer, err := proxy.SOCKS5("tcp", proxyHostPort, auth, proxy.Direct)
-		if err != nil {
-			return nil, fmt.Errorf("[代理] 创建 SOCKS5 代理失败 %q: %v", proxyAddr, err)
-		}
-
-		transport := &http.Transport{
-			DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
-				return dialer.Dial(network, addr)
-			},
-		}
-		client := &http.Client{Transport: transport}
-
-		if auth != nil {
-			color.Cyan("[代理] 使用 SOCKS5 代理: %s (用户: %s, DNS解析: %s)",
-				proxyHostPort, auth.User, map[bool]string{true: "远端(socks5h)", false: "本地(socks5)"}[scheme == "socks5h"])
-		} else {
-			color.Cyan("[代理] 使用 SOCKS5 代理: %s (无认证, DNS解析: %s)",
-				proxyHostPort, map[bool]string{true: "远端(socks5h)", false: "本地(socks5)"}[scheme == "socks5h"])
+			color.Cyan("[代理] 使用 %s 代理: %s:%s%s", strings.ToUpper(scheme), host, port, dnsNote)
 		}
 		return client, nil
 

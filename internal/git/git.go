@@ -29,27 +29,6 @@ func NewGitDumper() *GitDumper {
 	}
 }
 
-// 常见的 Git 文件
-var gitFiles = []string{
-	"HEAD",
-	"config",
-	"description",
-	"index",
-	"packed-refs",
-	"refs/heads/master",
-	"refs/heads/main",
-	"refs/remotes/origin/HEAD",
-	"refs/remotes/origin/master",
-	"refs/remotes/origin/main",
-	"refs/stash",
-	"logs/HEAD",
-	"logs/refs/heads/master",
-	"logs/refs/heads/main",
-	"logs/refs/remotes/origin/HEAD",
-	"logs/refs/remotes/origin/master",
-	"logs/refs/remotes/origin/main",
-}
-
 // Validate 验证URL是否有效
 func (d *GitDumper) Validate(url string) error {
 	if !strings.HasSuffix(url, ".git") && !strings.HasSuffix(url, ".git/") {
@@ -58,53 +37,9 @@ func (d *GitDumper) Validate(url string) error {
 	return nil
 }
 
-// Dump 下载 Git 源代码
+// Dump 下载 Git 源代码（调用 Execute 实现，保留向后兼容）
 func (g *GitDumper) Dump(targetURL, outdir, proxyAddr string, force bool) error {
-	httpClient, err := utils.CreateHTTPClient(proxyAddr)
-	if err != nil {
-		return fmt.Errorf("创建HTTP客户端失败: %v", err)
-	}
-
-	// 确保目标URL以/结尾
-	if targetURL[len(targetURL)-1] != '/' {
-		targetURL += "/"
-	}
-
-	// 下载常见的Git文件
-	for _, file := range gitFiles {
-		fileURL := targetURL + file
-		outPath := filepath.Join(outdir, file)
-
-		// 创建目录
-		if err := os.MkdirAll(filepath.Dir(outPath), 0755); err != nil {
-			return fmt.Errorf("创建目录失败: %v", err)
-		}
-
-		// 下载文件
-		resp, err := httpClient.Get(fileURL)
-		if err != nil {
-			continue // 忽略下载失败的文件
-		}
-		defer resp.Body.Close()
-
-		if resp.StatusCode != http.StatusOK {
-			continue // 忽略不存在的文件
-		}
-
-		// 创建文件
-		f, err := os.Create(outPath)
-		if err != nil {
-			return fmt.Errorf("创建文件失败: %v", err)
-		}
-		defer f.Close()
-
-		// 写入文件
-		if _, err := io.Copy(f, resp.Body); err != nil {
-			return fmt.Errorf("写入文件失败: %v", err)
-		}
-	}
-
-	return nil
+	return g.Execute(targetURL, outdir, proxyAddr, force, false, 1, nil)
 }
 
 // Check 检查目标是否存在 .git 信息泄露

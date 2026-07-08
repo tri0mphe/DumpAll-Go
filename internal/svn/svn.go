@@ -41,25 +41,23 @@ func (d *SvnDumper) Check(targetURL string, client *http.Client) (bool, error) {
 	// 检查 .svn/entries 文件
 	entriesURL := targetURL + ".svn/entries"
 	resp, err := client.Head(entriesURL)
-	if err != nil {
-		return false, nil
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode == http.StatusOK {
-		return true, nil
+	if err == nil {
+		ok := resp.StatusCode == http.StatusOK
+		resp.Body.Close()
+		if ok {
+			return true, nil
+		}
 	}
 
 	// 检查 .svn/wc.db 文件 (SVN 1.7+)
 	wcdbURL := targetURL + ".svn/wc.db"
 	resp, err = client.Head(wcdbURL)
-	if err != nil {
-		return false, nil
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode == http.StatusOK {
-		return true, nil
+	if err == nil {
+		ok := resp.StatusCode == http.StatusOK
+		resp.Body.Close()
+		if ok {
+			return true, nil
+		}
 	}
 
 	return false, nil
@@ -197,51 +195,31 @@ type SvnFileEntry struct {
 func ParseEntriesFromData(data []byte) []SvnFileEntry {
 	var entries []SvnFileEntry
 
-	// 打印前300字节原始内容，辅助排查格式问题
-	preview := string(data)
-	if len(preview) > 300 {
-		preview = preview[:300]
-	}
-	color.Yellow("[SVN-Extract] entries 原始内容预览: %q", preview)
-
 	// 以换页符 \f 切割记录
+	// records[0] 为版本号行（如 "10\n"），后续每块对应一条 entry
 	records := strings.Split(string(data), "\f")
-	color.Yellow("[SVN-Extract] entries 共 %d 条原始记录块", len(records))
 
 	for i, record := range records {
-		// 第0块包含版本号行，整块跳过（根目录信息不需要）
+		// 第0块仅含版本号，跳过
 		if i == 0 {
-			color.Yellow("[SVN-Extract] 跳过第0块(版本号+根目录): %q", func() string {
-				s := record
-				if len(s) > 80 {
-					s = s[:80]
-				}
-				return s
-			}())
 			continue
 		}
 
-		// 按 \n 切割字段，保留原始空行（空行代表该字段值为空）
+		// 按 \n 切割字段：
+		//   [0] name  — 文件/目录名；根目录节点此行为空字符串
+		//   [1] kind  — "file" 或 "dir"
+		// 注意：不裁剪末尾空行，因为 lines[0] 本身可能就是空字符串（根目录），
+		// 裁剪末尾会把有效的空 name 误删，导致 lines[1] 越界。
 		lines := strings.Split(record, "\n")
-
-		// 去掉末尾多余的空字符串（Split 末尾空行产生的）
-		for len(lines) > 0 && lines[len(lines)-1] == "" {
-			lines = lines[:len(lines)-1]
-		}
-
-		// 字段 [0]=name，[1]=kind
-		// 注意：\f 之后可能紧跟 \n，此时 lines[0]="" 表示 name 为空（根目录），应跳过
 		if len(lines) < 2 {
 			continue
 		}
 
-		name := lines[0] // 保留原始值（可能为空，空表示根目录）
+		name := lines[0]
 		kind := lines[1]
 
-		color.Yellow("[SVN-Extract] 记录[%d] name=%q kind=%q", i, name, kind)
-
+		// name 为空 = 根目录节点，跳过
 		if name == "" {
-			// 根目录节点，跳过
 			continue
 		}
 		if kind == "file" || kind == "dir" {
@@ -253,6 +231,9 @@ func ParseEntriesFromData(data []byte) []SvnFileEntry {
 }
 
 // ParseWcDbFromFile 解析 SVN 1.7+ 的 wc.db（SQLite）文件，返回被追踪的文件列表
+//
+// SVN wc.db schema（libsvn_wc/wc-metadata.sql）中 NODES.kind 为 TEXT 字段，
+// 取值为 'file'、'dir'、'symlink'、'subdir'、'unknown'，不是整数。
 func ParseWcDbFromFile(dbPath string) ([]SvnFileEntry, error) {
 	db, err := sql.Open("sqlite", dbPath)
 	if err != nil {
@@ -260,7 +241,7 @@ func ParseWcDbFromFile(dbPath string) ([]SvnFileEntry, error) {
 	}
 	defer db.Close()
 
-	// NODES 表中 local_relpath 为空字符串代表根节点，kind=1 表示 file，kind=2 表示 dir
+	// local_relpath 为空字符串代表仓库根节点，排除掉
 	rows, err := db.Query(`
 		SELECT local_relpath, kind
 		FROM NODES
@@ -274,16 +255,14 @@ func ParseWcDbFromFile(dbPath string) ([]SvnFileEntry, error) {
 
 	var entries []SvnFileEntry
 	for rows.Next() {
-		var relPath string
-		var kind int
+		var relPath, kind string
 		if err := rows.Scan(&relPath, &kind); err != nil {
 			continue
 		}
-		kindStr := "file"
-		if kind == 2 {
-			kindStr = "dir"
+		// 只保留 file 和 dir，忽略 symlink/subdir/unknown
+		if kind == "file" || kind == "dir" {
+			entries = append(entries, SvnFileEntry{RelPath: relPath, Kind: kind})
 		}
-		entries = append(entries, SvnFileEntry{RelPath: relPath, Kind: kindStr})
 	}
 	return entries, rows.Err()
 }
