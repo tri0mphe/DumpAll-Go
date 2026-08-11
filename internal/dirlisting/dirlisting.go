@@ -153,6 +153,15 @@ func (d *DirListingDumper) Execute(targetURL string, outdir string, proxyAddr st
 			return
 		}
 
+		// href 可能是协议相对(//other.com/x)或绝对URL(http://other.com/x)，
+		// 一旦跨 host/scheme，说明是外部链接（广告、CDN、别的站点），不应下载，
+		// 否则会把 host 名（如 "xxx.com"）当成本地目录名拼进 relPath，
+		// 导致后续 MkdirAll/Create 路径混乱甚至 "no such file or directory"。
+		if !strings.EqualFold(fileURL.Host, baseURL.Host) {
+			color.Yellow("[DirListing] 跳过跨域链接: %s", fileURL.String())
+			return
+		}
+
 		// 构建本地路径：用 fileURL.Path 相对于 baseURL.Path 的部分，防止路径穿越
 		// 例如 href="../../../etc/passwd" 经 url.Parse 解析后 fileURL 可能超出预期目录
 		relPath := strings.TrimPrefix(fileURL.Path, baseURL.Path)
@@ -205,6 +214,16 @@ func (d *DirListingDumper) Execute(targetURL string, outdir string, proxyAddr st
 		if resp.StatusCode != http.StatusOK {
 			color.Yellow("[DirListing] 跳过(状态码 %d): %s", resp.StatusCode, fileURL.String())
 			resp.Body.Close()
+			return
+		}
+
+		// 创建父目录（文件可能位于深层相对路径下，父目录未必已存在）
+		if err := os.MkdirAll(filepath.Dir(localPath), 0755); err != nil {
+			color.Red("[DirListing] 创建父目录失败 %s: %v", filepath.Dir(localPath), err)
+			resp.Body.Close()
+			if progressCb != nil {
+				progressCb(fileURL.String(), 0, "创建目录失败")
+			}
 			return
 		}
 
