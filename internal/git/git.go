@@ -163,3 +163,31 @@ func (d *GitDumper) Execute(targetURL string, outdir string, proxyAddr string, f
 
 	return nil
 }
+
+// downloadFile 下载单个远程文件到本地路径（供 Extract 相关逻辑复用）
+func downloadFile(client *http.Client, fileURL, localPath string) error {
+	if err := os.MkdirAll(filepath.Dir(localPath), 0755); err != nil {
+		return fmt.Errorf("创建目录失败: %v", err)
+	}
+
+	resp, err := client.Get(fileURL)
+	if err != nil {
+		return fmt.Errorf("请求失败: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("HTTP %d", resp.StatusCode)
+	}
+
+	f, err := os.Create(localPath)
+	if err != nil {
+		return fmt.Errorf("创建文件失败: %v", err)
+	}
+	defer f.Close()
+
+	if _, err := io.Copy(f, resp.Body); err != nil {
+		return fmt.Errorf("写入失败: %v", err)
+	}
+	return nil
+}

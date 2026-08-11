@@ -22,11 +22,12 @@ DumpAll-Go 是一个基于 [DumpAll](https://github.com/0x727/DumpAll) 的 Go �
 - 🔄 并发处理：支持批量扫描多个目标
 - 🛡️ 稳定可靠：更强的容错能力和稳定性
 - 🌐 代理支持：支持 HTTP / HTTPS / SOCKS5 / SOCKS5H 代理
+- 🔓 Git 源码提取：从 `.git` 泄露中一键还原完整源代码
 - 🔓 SVN 源码提取：从 `.svn` 泄露中一键还原完整源代码
 
 ### 🎯 适用场景
 
-- `.git` 源代码泄露
+- `.git` 源代码泄露 + 一键提取还原
 - `.svn` 源代码泄露 + 一键提取还原
 - `.DS_Store` 信息泄露
 - 目录列表泄露
@@ -86,6 +87,33 @@ Flags:
   -h, --help           查看帮助信息
 ```
 
+#### git-extract —— Git 源码提取
+
+当已确认目标存在 `.git` 信息泄露时，使用 `git-extract` 子命令直接提取还原完整源代码。实现原理参照业界标准工具 [GitHack](https://github.com/lijiejie/GitHack) 并做了增强。
+
+```bash
+Usage:
+  dumpall-go git-extract [flags]
+
+Flags:
+  -u, --url string      目标 URL（必填，例如: http://example.com/）
+  -o, --outdir string   输出目录（默认: output/<hostname>）
+  -p, --proxy string    代理服务器 (支持: http://host:port | socks5://host:port | socks5h://host:port)
+  -w, --workers int     并发下载线程数 (default 10)
+  -h, --help           查看帮助信息
+```
+
+采用两种互补的提取策略，结果自动合并去重：
+- **index 模式**（主策略，等价于 GitHack）：解析 `.git/index` 二进制文件，获取所有被跟踪文件的路径与 blob sha1，逐个下载 `.git/objects/xx/yyyy` 并 zlib 解压还原
+- **tree 递归模式**（增强策略）：当 `.git/index` 不可访问时，从 `.git/HEAD` 解析出当前分支 ref（必要时回退到 `.git/packed-refs`），下载 commit 对象拿到根 tree，递归遍历 tree/blob 对象还原完整目录结构
+
+输出目录结构：
+```
+output/<hostname>/
+  ├── .git/           ← 缓存的 index 等元数据
+  └── extracted/      ← ✅ 还原的源码（结构与原项目完全一致）
+```
+
 #### svn-extract —— SVN 源码提取
 
 当已确认目标存在 `.svn` 信息泄露时，使用 `svn-extract` 子命令直接提取还原完整源代码。
@@ -139,12 +167,17 @@ output/<hostname>/
 ```bash
 ./dumpall-go -u http://example.com/ -p socks5h://127.0.0.1:1080
 ```
-7. 提取 SVN 泄露的源代码：
+7. 提取 Git 泄露的源代码：
+```bash
+./dumpall-go git-extract -u http://example.com/
+```
+8. 提取 SVN 泄露的源代码：
 ```bash
 ./dumpall-go svn-extract -u http://example.com/
 ```
-8. 通过 SOCKS5 代理提取 SVN 源码并指定输出目录：
+9. 通过 SOCKS5 代理提取源码并指定输出目录：
 ```bash
+./dumpall-go git-extract -u http://example.com/ -p socks5://127.0.0.1:1080 -o ./leaked-src
 ./dumpall-go svn-extract -u http://example.com/ -p socks5://127.0.0.1:1080 -o ./leaked-src
 ```
 ## 🤝 贡献指南
